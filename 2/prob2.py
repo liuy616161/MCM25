@@ -247,12 +247,12 @@ def optimize_problem2():
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     
-    directions = list(range(0, 10, 1)) + list(range(175, 186, 1)) + list(range(350,361,1))
+    directions = np.linspace(0, 10, 41)
 
     # 搜索空间
     for direction in directions: 
         start_direction_time = time.time()
-        for speed in np.linspace(70, 140, 21):  # 70到140 m/s，每2.5 m/s搜索一次
+        for speed in np.linspace(90, 140, 26):  # 70到140 m/s，每2.5 m/s搜索一次
             for release_time in np.linspace(0, 1.5, 11):  
                 for detonation_delay in np.linspace(0, 1, 11):  
                     if release_time + detonation_delay > 7:

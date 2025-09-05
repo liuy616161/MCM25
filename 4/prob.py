@@ -4,10 +4,8 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import time
 import os
-import multiprocessing
-from joblib import Parallel, delayed
-from tqdm import tqdm
 import random
+from joblib import Parallel, delayed
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei']
@@ -27,11 +25,24 @@ REAL_TARGET_CENTER = np.array([0, 200, 5])  # 圆柱体中心点
 REAL_TARGET_RADIUS = 7  # m
 REAL_TARGET_HEIGHT = 10  # m
 
+# 导弹初始位置
 MISSILE_M1_INIT = np.array([20000, 0, 2000])
+MISSILE_M2_INIT = np.array([19000, 600, 2100])
+MISSILE_M3_INIT = np.array([18000, -600, 1900])
+
+# 无人机初始位置
 DRONE_FY1_INIT = np.array([17800, 0, 1800])
+DRONE_FY2_INIT = np.array([12000, 1400, 1400])
+DRONE_FY3_INIT = np.array([6000, -3000, 700])
+DRONE_FY4_INIT = np.array([11000, 2000, 1800])
+DRONE_FY5_INIT = np.array([13000, -2000, 1300])
+
+# 为问题4使用的无人机
+DRONES_PROBLEM4 = [DRONE_FY1_INIT, DRONE_FY2_INIT, DRONE_FY3_INIT]
+DRONE_NAMES = ["FY1", "FY2", "FY3"]
 
 # 创建结果目录
-RESULTS_DIR = "optimization_results_q3"
+RESULTS_DIR = "optimization_results_q4"
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
@@ -81,7 +92,9 @@ def smoke_cloud_trajectory(detonation_pos, detonation_time, t):
 
 def is_target_in_shadow_cone(missile_pos, cloud_pos, target_pos, target_radius, target_height):
     """检查目标是否在烟幕云团投射的阴影锥体内"""
-
+    if missile_pos[0] - 10 < cloud_pos[0]:
+        return False
+    
     # 计算烟幕云团到导弹的方向向量
     direction = missile_pos - cloud_pos
     distance_missile_cloud = np.linalg.norm(direction)
@@ -131,11 +144,6 @@ def is_target_in_shadow_cone(missile_pos, cloud_pos, target_pos, target_radius, 
             
         # 计算该向量与导弹到云团方向的夹角余弦值
         cos_angle = np.dot(missile_to_point, unit_direction) / distance
-        
-        if cos_angle > 0:
-            # 如果夹角大于90度，说明点在导弹的背后，不在阴影锥体内
-            return False
-
         # 取绝对值
         cos_angle = abs(cos_angle)
         cos_theta = abs(cos_theta)
@@ -159,12 +167,12 @@ def calculate_shielding_effectiveness(missile_pos, cloud_pos, cloud_start_time, 
     
     return 1 if target_shielded else 0
 
-def calculate_single_smoke_effect(drone_direction, drone_speed, release_time, detonation_delay, time_step=0.01):
+def calculate_single_smoke_effect(drone_init_pos, drone_direction, drone_speed, release_time, detonation_delay, time_step=0.01):
     """计算单个烟幕干扰弹的效果，返回有效遮蔽的时间区间列表"""
     detonation_time = release_time + detonation_delay
     
     # 计算投放点
-    release_pos = drone_trajectory(DRONE_FY1_INIT, drone_direction, drone_speed, release_time)
+    release_pos = drone_trajectory(drone_init_pos, drone_direction, drone_speed, release_time)
     
     # 计算起爆点
     detonation_pos = smoke_trajectory(release_pos, release_time, drone_direction, drone_speed, detonation_time)
@@ -233,186 +241,156 @@ def calculate_total_effective_time(time_intervals):
     total_time = sum(end - start for start, end in merged)
     return total_time
 
-def calculate_multi_smoke_effect(params):
-    """计算多个烟幕干扰弹的总效果
+def calculate_multi_drone_effect(params):
+    """计算多无人机联合投放烟幕干扰弹的总效果
     
     参数格式:
-    params = [direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3]
+    params = [
+        dir1, spd1, t_r1, dt_d1,  # FY1的参数
+        dir2, spd2, t_r2, dt_d2,  # FY2的参数
+        dir3, spd3, t_r3, dt_d3   # FY3的参数
+    ]
     """
-    direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3 = params
+    # 解析参数
+    dir1, spd1, t_r1, dt_d1, dir2, spd2, t_r2, dt_d2, dir3, spd3, t_r3, dt_d3 = params
     
-    # 计算三个烟幕弹的有效遮蔽时间区间
-    intervals1 = calculate_single_smoke_effect(direction, speed, t_r1, dt_d1)
-    intervals2 = calculate_single_smoke_effect(direction, speed, t_r2, dt_d2)
-    intervals3 = calculate_single_smoke_effect(direction, speed, t_r3, dt_d3)
+    # 计算三个无人机的烟幕弹效果
+    intervals1 = calculate_single_smoke_effect(DRONE_FY1_INIT, dir1, spd1, t_r1, dt_d1)
+    intervals2 = calculate_single_smoke_effect(DRONE_FY2_INIT, dir2, spd2, t_r2, dt_d2)
+    intervals3 = calculate_single_smoke_effect(DRONE_FY3_INIT, dir3, spd3, t_r3, dt_d3)
     
     # 计算总有效遮蔽时长
     total_time = calculate_total_effective_time([intervals1, intervals2, intervals3])
     
+    # 计算各投放点和起爆点
+    release_pos1 = drone_trajectory(DRONE_FY1_INIT, dir1, spd1, t_r1)
+    detonation_pos1 = smoke_trajectory(release_pos1, t_r1, dir1, spd1, t_r1 + dt_d1)
+    
+    release_pos2 = drone_trajectory(DRONE_FY2_INIT, dir2, spd2, t_r2)
+    detonation_pos2 = smoke_trajectory(release_pos2, t_r2, dir2, spd2, t_r2 + dt_d2)
+    
+    release_pos3 = drone_trajectory(DRONE_FY3_INIT, dir3, spd3, t_r3)
+    detonation_pos3 = smoke_trajectory(release_pos3, t_r3, dir3, spd3, t_r3 + dt_d3)
+    
     return {
         'params': params,
         'effective_duration': total_time,
-        'intervals': [intervals1, intervals2, intervals3]
+        'intervals': [intervals1, intervals2, intervals3],
+        'release_positions': [release_pos1, release_pos2, release_pos3],
+        'detonation_positions': [detonation_pos1, detonation_pos2, detonation_pos3],
+        'detonation_times': [t_r1 + dt_d1, t_r2 + dt_d2, t_r3 + dt_d3]
     }
 
 def validate_params(params):
     """验证参数是否合法"""
-    direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3 = params
+    dir1, spd1, t_r1, dt_d1, dir2, spd2, t_r2, dt_d2, dir3, spd3, t_r3, dt_d3 = params
     
     # 检查方向范围
-    if not (0 <= direction < 360):
+    if not all(0 <= d < 360 for d in [dir1, dir2, dir3]):
         return False
     
     # 检查速度范围
-    if not (70 <= speed <= 140):
+    if not all(70 <= s <= 140 for s in [spd1, spd2, spd3]):
         return False
     
-    # 检查投放时间顺序
-    if not (t_r1 < t_r2 < t_r3):
+    # 检查投放时间和起爆延迟
+    if not all(t >= 0 for t in [t_r1, t_r2, t_r3, dt_d1, dt_d2, dt_d3]):
         return False
     
     # 检查起爆延迟范围
-    if not (0.0 <= dt_d1 <= 2.0 and 0.0 <= dt_d2 <= 2.0 and 0.0 <= dt_d3 <= 2.0):
+    if not all(0.1 <= d <= 2.0 for d in [dt_d1, dt_d2, dt_d3]):
         return False
     
     # 检查总投放时间约束
-    if t_r3 + dt_d3 > 12.0:
+    if not all(t_r + dt_d <= 15.0 for t_r, dt_d in [(t_r1, dt_d1), (t_r2, dt_d2), (t_r3, dt_d3)]):
         return False
     
     return True
 
 def constrain_params(params):
     """约束参数在有效范围内"""
-    direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3 = params
+    dir1, spd1, t_r1, dt_d1, dir2, spd2, t_r2, dt_d2, dir3, spd3, t_r3, dt_d3 = params
     
     # 约束方向
-    direction = direction % 360
+    dir1 = dir1 % 360
+    dir2 = dir2 % 360
+    dir3 = dir3 % 360
     
     # 约束速度
-    speed = max(70, min(140, speed))
+    spd1 = max(70, min(140, spd1))
+    spd2 = max(70, min(140, spd2))
+    spd3 = max(70, min(140, spd3))
     
-    # 约束起爆延迟
-    dt_d1 = max(0.0, min(2.0, dt_d1))
-    dt_d2 = max(0.0, min(2.0, dt_d2))
-    dt_d3 = max(0.0, min(2.0, dt_d3))
+    # 约束投放时间和起爆延迟
+    t_r1 = max(0, t_r1)
+    t_r2 = max(0, t_r2)
+    t_r3 = max(0, t_r3)
     
-    # 约束投放时间顺序和总时间
-    if t_r1 < 0: t_r1 = 0
-    t_r2 = max(t_r1 + 1, t_r2)
-    t_r3 = max(t_r2 + 1, t_r3)
+    dt_d1 = max(0.1, min(2.0, dt_d1))
+    dt_d2 = max(0.1, min(2.0, dt_d2))
+    dt_d3 = max(0.1, min(2.0, dt_d3))
     
     # 确保总投放时间不超过约束
-    if t_r3 + dt_d3 > 12.0:
-        scale = 12.0 / (t_r3 + dt_d3)
-        t_r1 *= scale
-        t_r2 *= scale
-        t_r3 *= scale
+    for i, (t_r, dt_d) in enumerate([(t_r1, dt_d1), (t_r2, dt_d2), (t_r3, dt_d3)]):
+        if t_r + dt_d > 15.0:
+            scale = 15.0 / (t_r + dt_d)
+            if i == 0:
+                t_r1 *= scale
+                dt_d1 *= scale
+            elif i == 1:
+                t_r2 *= scale
+                dt_d2 *= scale
+            else:
+                t_r3 *= scale
+                dt_d3 *= scale
     
-    return [direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3]
+    return [dir1, spd1, t_r1, dt_d1, dir2, spd2, t_r2, dt_d2, dir3, spd3, t_r3, dt_d3]
 
-def adaptive_local_search(initial_params, iterations=50, initial_step_sizes=None):
-    """自适应局部搜索算法"""
-    if initial_step_sizes is None:
-        initial_step_sizes = [1.0, 2.0, 0.1, 0.05, 0.1, 0.05, 0.1, 0.05]
-    
-    best_params = initial_params
-    best_result = calculate_multi_smoke_effect(best_params)
-    best_fitness = best_result['effective_duration']
-    
-    step_sizes = initial_step_sizes.copy()
-    
-    for iteration in range(iterations):
-        improved = False
-        
-        # 对每个参数进行扰动
-        for i in range(len(best_params)):
-            for direction in [1, -1]:
-                new_params = best_params.copy()
-                new_params[i] += direction * step_sizes[i]
-                
-                # 确保参数在有效范围内
-                new_params = constrain_params(new_params)
-                
-                # 检查是否为有效参数
-                if not validate_params(new_params):
-                    continue
-                
-                result = calculate_multi_smoke_effect(new_params)
-                fitness = result['effective_duration']
-                
-                if fitness > best_fitness:
-                    best_fitness = fitness
-                    best_params = new_params
-                    best_result = result
-                    improved = True
-                    print(f"迭代 {iteration}: 找到更好的解，有效时长: {best_fitness:.4f}")
-        
-        # 自适应调整步长
-        if not improved:
-            step_sizes = [s * 0.7 for s in step_sizes]  # 缩小搜索步长
-            print(f"迭代 {iteration}: 无改进，缩小步长至 {step_sizes}")
-        else:
-            print(f"迭代 {iteration}: 当前最佳参数: {best_params}")
-        
-        # 步长过小时终止
-        if max(step_sizes) < 0.01:
-            print(f"步长过小，提前终止搜索，迭代次数: {iteration+1}/{iterations}")
-            break
-    
-    return best_result
-
-def genetic_algorithm(population_size=80, generations=40, elite_size=8, mutation_rate=0.2):
-    """遗传算法优化"""
-    # 从问题2的结果初始化方向和速度范围
-    direction_range = (1, 10)
-    speed_range = (90, 140)
+def genetic_algorithm(population_size=100, generations=30, elite_size=10, mutation_rate=0.2):
+    """遗传算法优化多无人机投放策略"""
+    print("开始遗传算法优化...")
     
     # 创建初始种群
-    population = [] 
+    population = []
     for _ in range(population_size):
-        # 创建一个随机个体
-        direction = random.uniform(*direction_range)
-        speed = random.uniform(*speed_range)
+        # 为每个无人机随机生成参数
+        individual = []
+        for _ in range(3):  # 三架无人机
+            direction = random.uniform(0, 360)
+            speed = random.uniform(70, 140)
+            release_time = random.uniform(0, 4.0)
+            detonation_delay = random.uniform(0.1, 2.0)
+            individual.extend([direction, speed, release_time, detonation_delay])
         
-        # 随机生成三个投放时间和起爆延迟
-        t_r1 = random.uniform(0.0, 2.0)
-        dt_d1 = random.uniform(0.0, 2.0)
-        
-        t_r2 = random.uniform(t_r1 + 1, 5.0)
-        dt_d2 = random.uniform(0.0, 2.0)
-        
-        t_r3 = random.uniform(t_r2 + 1, 8.0)
-        dt_d3 = random.uniform(0.0, 2.0)
-        
-        # 确保总投放时间不超过约束
-        if t_r3 + dt_d3 > 12.0:
-            scale = 12.0 / (t_r3 + dt_d3)
-            t_r1 *= scale
-            t_r2 *= scale
-            t_r3 *= scale
-        
-        params = [direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3]
-        population.append(params)
+        # 约束参数并添加到种群
+        individual = constrain_params(individual)
+        population.append(individual)
     
-    # 初始种群加入一些手动优化的起点
-    # 起点1：从问题2的最优解扩展
-    population[0] = [6.0, 138  , 0.325, 0.5, 2.5, 0.5, 4.7, 0.6]
-    # 起点2：均匀间隔的投放
-    population[1] = [5.0, 135.0, 0.2, 0.3, 2.7, 0.4, 5.2, 0.5]
-    # 起点3：注重早期遮蔽
-    population[2] = [5.0, 135.0, 0.1, 0.5, 1.5, 0.6, 3.0, 0.7]
-    # 起点4：注重后期遮蔽
-    population[3] = [5.0, 135.0, 1.0, 0.3, 3.0, 0.4, 5.0, 0.5]
+    # 添加基于问题2和问题3的知识的种子个体
+    # FY1的种子参数从问题2得知
+    population[0] = [
+        5.0, 136.5, 0.3, 0.4,  # FY1参数
+        30.0, 120.0, 1.0, 0.5,  # FY2参数
+        350.0, 130.0, 2.0, 0.3  # FY3参数
+    ]
+    
+    # 另一个变种种子
+    population[1] = [
+        6.0, 135.0, 0.5, 0.5,  # FY1参数
+        25.0, 135.0, 1.5, 0.4,  # FY2参数
+        355.0, 125.0, 2.5, 0.5  # FY3参数
+    ]
     
     best_individual = None
     best_fitness = 0
-
-        # 创建列表存储每代最佳个体
-    generation_best_records = []
+    best_result = None
+    
+    # 记录每代最佳适应度
+    generation_fitness = []
     
     # 进化迭代
     for generation in range(generations):
-        print(f"\n开始第 {generation+1}/{generations} 代进化")
+        print(f"开始第 {generation+1}/{generations} 代进化")
         
         # 评估适应度
         fitness_results = []
@@ -420,8 +398,8 @@ def genetic_algorithm(population_size=80, generations=40, elite_size=8, mutation
             if not validate_params(individual):
                 fitness_results.append(0)
                 continue
-            
-            result = calculate_multi_smoke_effect(individual)
+                
+            result = calculate_multi_drone_effect(individual)
             fitness = result['effective_duration']
             fitness_results.append(fitness)
             
@@ -429,42 +407,18 @@ def genetic_algorithm(population_size=80, generations=40, elite_size=8, mutation
             if fitness > best_fitness:
                 best_fitness = fitness
                 best_individual = individual.copy()
+                best_result = result
                 print(f"第 {generation+1} 代: 找到更好的解，有效时长: {best_fitness:.4f}")
-                print(f"参数: {best_individual}")
         
-        # 找出本代最佳个体
+        # 记录本代最佳适应度
         gen_best_idx = np.argmax(fitness_results)
         gen_best_fitness = fitness_results[gen_best_idx]
-        gen_best_individual = population[gen_best_idx]
-        
-        # 记录本代最佳个体
-        record = {
-            'generation': generation + 1,
-            'fitness': round(gen_best_fitness, 4),
-            'direction': round(gen_best_individual[0], 4),
-            'speed': round(gen_best_individual[1], 4),
-            't_r1': round(gen_best_individual[2], 4),
-            'dt_d1': round(gen_best_individual[3], 4),
-            't_r2': round(gen_best_individual[4], 4),
-            'dt_d2': round(gen_best_individual[5], 4),
-            't_r3': round(gen_best_individual[6], 4),
-            'dt_d3': round(gen_best_individual[7], 4)
-        }
-        generation_best_records.append(record)
+        generation_fitness.append(gen_best_fitness)
         
         print(f"第 {generation+1} 代最佳适应度: {gen_best_fitness:.4f}")
-        print(f"参数: {gen_best_individual}")
-
+        
         # 如果已经到最后一代，跳出循环
         if generation == generations - 1:
-
-            # 保存最后一代population记录到Excel
-            df_population = pd.DataFrame(population)
-            df_population.columns = ['direction', 'speed', 't_r1', 'dt_d1', 't_r2', 'dt_d2', 't_r3', 'dt_d3']
-            df_population['fitness'] = fitness_results
-            df_population.to_excel(f'{RESULTS_DIR}/ga_final_population.xlsx', index=False)
-            print(f"已保存遗传算法最后一代种群到 {RESULTS_DIR}/ga_final_population.xlsx")
-
             break
         
         # 选择精英
@@ -503,12 +457,12 @@ def genetic_algorithm(population_size=80, generations=40, elite_size=8, mutation
             for i in range(len(child)):
                 if random.random() < mutation_rate:
                     # 根据不同参数使用不同的变异幅度
-                    if i == 0:  # 方向
-                        child[i] += random.uniform(-2, 2)
-                    elif i == 1:  # 速度
-                        child[i] += random.uniform(-5, 5)
+                    if i % 4 == 0:  # 方向
+                        child[i] += random.uniform(-20, 20)
+                    elif i % 4 == 1:  # 速度
+                        child[i] += random.uniform(-10, 10)
                     else:  # 时间参数
-                        child[i] += random.uniform(-0.3, 0.3)
+                        child[i] += random.uniform(-0.5, 0.5)
             
             # 约束参数
             child = constrain_params(child)
@@ -519,35 +473,37 @@ def genetic_algorithm(population_size=80, generations=40, elite_size=8, mutation
         
         # 更新种群
         population = new_population
-        
-    # 保存每代最佳个体记录到Excel
-    df_records = pd.DataFrame(generation_best_records)
-    df_records.to_excel(f'{RESULTS_DIR}/ga_generation_best_records.xlsx', index=False)
-    print(f"已保存遗传算法每代最佳个体记录到 {RESULTS_DIR}/ga_generation_best_records.xlsx")
     
-    
-    # 对最佳个体进行局部搜索微调
-    print("\n对全局最佳解进行局部搜索微调...")
-    best_result = adaptive_local_search(best_individual, iterations=20)
+    # 绘制进化过程
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, generations+1), generation_fitness, 'b-', marker='o')
+    plt.xlabel('代数')
+    plt.ylabel('最佳适应度 (有效遮蔽时长)')
+    plt.title('遗传算法进化过程')
+    plt.grid(True)
+    plt.savefig(f"{RESULTS_DIR}/ga_evolution.png", dpi=300)
+    plt.close()
     
     return best_result
 
 def particle_swarm_optimization(n_particles=50, iterations=30):
     """粒子群优化算法"""
-    # 从问题2的结果初始化方向和速度范围
-    direction_range = (1, 10)
-    speed_range = (90, 140)
+    print("开始粒子群优化...")
     
     # 参数范围定义
     param_ranges = [
-        direction_range,           # 方向
-        speed_range,               # 速度
-        (0.0, 2.0),                # t_r1
-        (0.0, 2.0),                # dt_d1
-        (0.0, 5.0),                # t_r2
-        (0.0, 2.0),                # dt_d2
-        (0.0, 8.0),                # t_r3
-        (0.0, 2.0)                 # dt_d3
+        (0, 360),    # dir1
+        (70, 140),   # spd1
+        (0, 4.0),    # t_r1
+        (0.1, 2.0),  # dt_d1
+        (0, 360),    # dir2
+        (70, 140),   # spd2
+        (0, 4.0),    # t_r2
+        (0.1, 2.0),  # dt_d2
+        (0, 360),    # dir3
+        (70, 140),   # spd3
+        (0, 4.0),    # t_r3
+        (0.1, 2.0)   # dt_d3
     ]
     
     # 初始化粒子
@@ -556,7 +512,7 @@ def particle_swarm_optimization(n_particles=50, iterations=30):
     for _ in range(n_particles):
         # 随机初始化粒子位置
         particle = []
-        for i, (min_val, max_val) in enumerate(param_ranges):
+        for min_val, max_val in param_ranges:
             particle.append(random.uniform(min_val, max_val))
         
         # 确保参数合法
@@ -565,10 +521,17 @@ def particle_swarm_optimization(n_particles=50, iterations=30):
         
         # 初始化粒子速度
         velocity = []
-        for i, (min_val, max_val) in enumerate(param_ranges):
+        for min_val, max_val in param_ranges:
             range_size = max_val - min_val
             velocity.append(random.uniform(-range_size * 0.1, range_size * 0.1))
         velocities.append(velocity)
+    
+    # 添加基于问题2和问题3的知识的种子粒子
+    particles[0] = [
+        5.0, 136.5, 0.3, 0.4,  # FY1参数
+        30.0, 120.0, 1.0, 0.5,  # FY2参数
+        350.0, 130.0, 2.0, 0.3  # FY3参数
+    ]
     
     # 初始化粒子历史最佳位置和适应度
     best_positions = particles.copy()
@@ -577,17 +540,14 @@ def particle_swarm_optimization(n_particles=50, iterations=30):
     # 全局最佳位置和适应度
     global_best_position = None
     global_best_fitness = 0
-
-    # 创建列表存储每次迭代的最佳个体
-    iteration_best_records = []
+    global_best_result = None
+    
+    # 记录每次迭代的最佳适应度
+    iteration_fitness = []
     
     # 迭代优化
     for iteration in range(iterations):
-        print(f"\n开始第 {iteration+1}/{iterations} 次迭代")
-        
-        # 当前迭代的最佳适应度
-        iteration_best_fitness = 0
-        iteration_best_particle = None
+        print(f"开始第 {iteration+1}/{iterations} 次迭代")
         
         # 评估每个粒子的适应度
         for i, particle in enumerate(particles):
@@ -595,15 +555,9 @@ def particle_swarm_optimization(n_particles=50, iterations=30):
             if not validate_params(particle):
                 continue
             
-            result = calculate_multi_smoke_effect(particle)
+            result = calculate_multi_drone_effect(particle)
             fitness = result['effective_duration']
             
-            # 更新当前迭代的最佳
-            if fitness > iteration_best_fitness:
-                iteration_best_fitness = fitness
-                iteration_best_particle = particle.copy()
-
-
             # 更新个体历史最佳
             if fitness > best_fitnesses[i]:
                 best_fitnesses[i] = fitness
@@ -613,26 +567,14 @@ def particle_swarm_optimization(n_particles=50, iterations=30):
                 if fitness > global_best_fitness:
                     global_best_fitness = fitness
                     global_best_position = particle.copy()
+                    global_best_result = result
                     print(f"第 {iteration+1} 次迭代: 找到更好的解，有效时长: {global_best_fitness:.4f}")
-                    print(f"参数: {global_best_position}")
         
-
-        # 记录本次迭代的最佳个体
-        if iteration_best_particle:
-            record = {
-                'iteration': iteration + 1,
-                'fitness': round(iteration_best_fitness, 4),
-                'direction': round(iteration_best_particle[0], 4),
-                'speed': round(iteration_best_particle[1], 4),
-                't_r1': round(iteration_best_particle[2], 4),
-                'dt_d1': round(iteration_best_particle[3], 4),
-                't_r2': round(iteration_best_particle[4], 4),
-                'dt_d2': round(iteration_best_particle[5], 4),
-                't_r3': round(iteration_best_particle[6], 4),
-                'dt_d3': round(iteration_best_particle[7], 4)
-            }
-            iteration_best_records.append(record)
-
+        # 记录本次迭代的最佳适应度
+        iteration_fitness.append(global_best_fitness)
+        
+        print(f"第 {iteration+1} 次迭代全局最佳适应度: {global_best_fitness:.4f}")
+        
         # 更新粒子速度和位置
         w = 0.7  # 惯性权重
         c1 = 1.5  # 个体学习因子
@@ -651,45 +593,35 @@ def particle_swarm_optimization(n_particles=50, iterations=30):
                 
                 # 更新位置
                 particles[i][j] += velocities[i][j]
-            # 保存最后一代粒子群记录到Excel
-            if i == n_particles - 1 and iteration == iterations - 1:
-                df_particles = pd.DataFrame(particles)
-                df_particles.columns = ['direction', 'speed', 't_r1', 'dt_d1', 't_r2', 'dt_d2', 't_r3', 'dt_d3']
-                df_particles['fitness'] = best_fitnesses
-                df_particles.to_excel(f'{RESULTS_DIR}/pso_final_particles.xlsx', index=False)
-                print(f"已保存粒子群优化最后一代粒子到 {RESULTS_DIR}/pso_final_particles.xlsx")
             
             # 约束参数
             particles[i] = constrain_params(particles[i])
-        
-        # 显示当前迭代最佳
-        print(f"第 {iteration+1} 次迭代全局最佳适应度: {global_best_fitness:.4f}")
     
-    # 保存每次迭代的最佳个体记录到Excel
-    df_records = pd.DataFrame(iteration_best_records)
-    df_records.to_excel(f'{RESULTS_DIR}/pso_iteration_best_records.xlsx', index=False)
-    print(f"已保存粒子群优化每次迭代最佳个体记录到 {RESULTS_DIR}/pso_iteration_best_records.xlsx")
+    # 绘制迭代过程
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, iterations+1), iteration_fitness, 'g-', marker='o')
+    plt.xlabel('迭代次数')
+    plt.ylabel('全局最佳适应度 (有效遮蔽时长)')
+    plt.title('粒子群优化迭代过程')
+    plt.grid(True)
+    plt.savefig(f"{RESULTS_DIR}/pso_iteration.png", dpi=300)
+    plt.close()
     
-
-    # 对最佳粒子进行局部搜索微调
-    print("\n对全局最佳解进行局部搜索微调...")
-    best_result = adaptive_local_search(global_best_position, iterations=20)
-    
-    return best_result
+    return global_best_result
 
 def hybrid_optimization():
     """混合优化策略：结合多种算法"""
     print("开始混合优化...")
     
-    # 2. 遗传算法
+    # 1. 遗传算法
     print("\n===== 执行遗传算法 =====")
     ga_result = genetic_algorithm()
     
-    # 3. 粒子群算法
+    # 2. 粒子群优化
     print("\n===== 执行粒子群优化 =====")
     pso_result = particle_swarm_optimization()
     
-    # 比较三种算法的结果
+    # 比较两种算法的结果
     results = [
         ("遗传算法", ga_result),
         ("粒子群优化", pso_result)
@@ -703,33 +635,21 @@ def hybrid_optimization():
     
     print(f"\n最佳方法: {best_method[0]}")
     print(f"最终有效遮蔽时长: {best_method[1]['effective_duration']:.4f}")
-    print(f"最优参数: {best_method[1]['params']}")
     
     return best_method[1]
 
-def visualize_multi_smoke_effect(result):
-    """可视化多烟幕干扰弹效果"""
+def visualize_multi_drone_effect(result):
+    """可视化多无人机投放烟幕干扰弹效果"""
     params = result['params']
-    direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3 = params
     
-    # 计算投放点和起爆点
-    release_pos1 = drone_trajectory(DRONE_FY1_INIT, direction, speed, t_r1)
-    detonation_time1 = t_r1 + dt_d1
-    detonation_pos1 = smoke_trajectory(release_pos1, t_r1, direction, speed, detonation_time1)
-    
-    release_pos2 = drone_trajectory(DRONE_FY1_INIT, direction, speed, t_r2)
-    detonation_time2 = t_r2 + dt_d2
-    detonation_pos2 = smoke_trajectory(release_pos2, t_r2, direction, speed, detonation_time2)
-    
-    release_pos3 = drone_trajectory(DRONE_FY1_INIT, direction, speed, t_r3)
-    detonation_time3 = t_r3 + dt_d3
-    detonation_pos3 = smoke_trajectory(release_pos3, t_r3, direction, speed, detonation_time3)
+    # 解析参数
+    dir1, spd1, t_r1, dt_d1, dir2, spd2, t_r2, dt_d2, dir3, spd3, t_r3, dt_d3 = params
     
     # 导弹到达假目标的时间
     missile_total_time = missile_time_to_target(MISSILE_M1_INIT, FAKE_TARGET, MISSILE_SPEED)
     
     # 创建3D图
-    fig = plt.figure(figsize=(14, 10))
+    fig = plt.figure(figsize=(15, 12))
     ax = fig.add_subplot(111, projection='3d')
     
     # 绘制假目标
@@ -754,43 +674,41 @@ def visualize_multi_smoke_effect(result):
     ax.scatter(MISSILE_M1_INIT[0], MISSILE_M1_INIT[1], MISSILE_M1_INIT[2], 
                color='darkred', label='导弹M1初始位置')
     
-    # 绘制无人机轨迹
-    drone_times = np.linspace(0, t_r3, 100)
-    drone_positions = []
-    for t in drone_times:
-        drone_positions.append(drone_trajectory(DRONE_FY1_INIT, direction, speed, t))
-    drone_positions = np.array(drone_positions)
-    ax.plot(drone_positions[:, 0], drone_positions[:, 1], drone_positions[:, 2], 
-            color='green', label='无人机FY1轨迹')
-    ax.scatter(DRONE_FY1_INIT[0], DRONE_FY1_INIT[1], DRONE_FY1_INIT[2], 
-               color='darkgreen', label='无人机FY1初始位置')
+    # 绘制无人机轨迹和投放点
+    drone_params = [
+        (DRONE_FY1_INIT, dir1, spd1, t_r1, "FY1", "green"),
+        (DRONE_FY2_INIT, dir2, spd2, t_r2, "FY2", "purple"),
+        (DRONE_FY3_INIT, dir3, spd3, t_r3, "FY3", "orange")
+    ]
     
-    # 绘制三个烟幕弹投放点和起爆点
-    ax.scatter(release_pos1[0], release_pos1[1], release_pos1[2], 
-               color='orange', s=80, label='烟幕弹1投放点')
-    ax.scatter(detonation_pos1[0], detonation_pos1[1], detonation_pos1[2], 
-               color='darkorange', s=80, label='烟幕弹1起爆点')
+    release_positions = result['release_positions']
+    detonation_positions = result['detonation_positions']
+    detonation_times = result['detonation_times']
     
-    ax.scatter(release_pos2[0], release_pos2[1], release_pos2[2], 
-               color='purple', s=80, label='烟幕弹2投放点')
-    ax.scatter(detonation_pos2[0], detonation_pos2[1], detonation_pos2[2], 
-               color='darkviolet', s=80, label='烟幕弹2起爆点')
-    
-    ax.scatter(release_pos3[0], release_pos3[1], release_pos3[2], 
-               color='cyan', s=80, label='烟幕弹3投放点')
-    ax.scatter(detonation_pos3[0], detonation_pos3[1], detonation_pos3[2], 
-               color='darkcyan', s=80, label='烟幕弹3起爆点')
+    for i, (drone_init, direction, speed, release_time, drone_name, color) in enumerate(drone_params):
+        # 绘制无人机初始位置
+        ax.scatter(drone_init[0], drone_init[1], drone_init[2], 
+                   color=color, marker='^', s=100, label=f'{drone_name}初始位置')
+        
+        # 绘制无人机轨迹
+        drone_times = np.linspace(0, release_time, 50)
+        drone_positions = []
+        for t in drone_times:
+            drone_positions.append(drone_trajectory(drone_init, direction, speed, t))
+        drone_positions = np.array(drone_positions)
+        ax.plot(drone_positions[:, 0], drone_positions[:, 1], drone_positions[:, 2], 
+                color=color, linestyle='-', label=f'{drone_name}轨迹')
+        
+        # 绘制投放点和起爆点
+        ax.scatter(release_positions[i][0], release_positions[i][1], release_positions[i][2], 
+                   color=color, s=80, marker='o', label=f'{drone_name}投放点')
+        ax.scatter(detonation_positions[i][0], detonation_positions[i][1], detonation_positions[i][2], 
+                   color=color, s=80, marker='*', label=f'{drone_name}起爆点')
     
     # 绘制有效遮蔽时间区间的烟幕云团
-    colors = ['orange', 'purple', 'cyan']
-    for i, (detonation_time, detonation_pos) in enumerate([
-            (detonation_time1, detonation_pos1),
-            (detonation_time2, detonation_pos2),
-            (detonation_time3, detonation_pos3)
-        ]):
-        # 获取有效遮蔽时间区间
-        intervals = result['intervals'][i] if 'intervals' in result else []
-        
+    colors = ['green', 'purple', 'orange']
+    for i, (intervals, detonation_pos, detonation_time) in enumerate(zip(
+            result['intervals'], detonation_positions, detonation_times)):
         # 对每个有效区间，绘制多个时间点的云团
         for interval_start, interval_end in intervals:
             for t in np.linspace(interval_start, interval_end, 3):
@@ -814,43 +732,40 @@ def visualize_multi_smoke_effect(result):
     ax.text2D(0.05, 0.95, f"总有效遮蔽时长: {result['effective_duration']:.2f}秒", 
               transform=ax.transAxes, fontsize=12)
     
-    # 添加每个烟幕弹的参数信息
-    ax.text2D(0.05, 0.90, f"烟幕弹1: 投放时间={t_r1:.2f}s, 起爆延迟={dt_d1:.2f}s", 
-              transform=ax.transAxes, fontsize=10, color='orange')
-    ax.text2D(0.05, 0.87, f"烟幕弹2: 投放时间={t_r2:.2f}s, 起爆延迟={dt_d2:.2f}s", 
-              transform=ax.transAxes, fontsize=10, color='purple')
-    ax.text2D(0.05, 0.84, f"烟幕弹3: 投放时间={t_r3:.2f}s, 起爆延迟={dt_d3:.2f}s", 
-              transform=ax.transAxes, fontsize=10, color='cyan')
+    # 添加每个无人机的参数信息
+    drone_info = [
+        (f"FY1: 方向={dir1:.1f}°, 速度={spd1:.1f}m/s, 投放={t_r1:.2f}s, 延迟={dt_d1:.2f}s", "green"),
+        (f"FY2: 方向={dir2:.1f}°, 速度={spd2:.1f}m/s, 投放={t_r2:.2f}s, 延迟={dt_d2:.2f}s", "purple"),
+        (f"FY3: 方向={dir3:.1f}°, 速度={spd3:.1f}m/s, 投放={t_r3:.2f}s, 延迟={dt_d3:.2f}s", "orange")
+    ]
+    
+    for i, (info, color) in enumerate(drone_info):
+        ax.text2D(0.05, 0.92 - i * 0.03, info, transform=ax.transAxes, fontsize=10, color=color)
     
     # 设置坐标轴范围和标签
-    ax.set_xlim([0, 20000])
-    ax.set_ylim([-500, 500])
+    ax.set_xlim([-1000, 21000])
+    ax.set_ylim([-3500, 3500])
     ax.set_zlim([0, 2500])
     ax.set_xlabel('X轴 (m)')
     ax.set_ylabel('Y轴 (m)')
     ax.set_zlabel('Z轴 (m)')
-    ax.set_title('问题3: 三枚烟幕干扰弹投放策略')
+    ax.set_title('问题4: 多无人机协同投放烟幕干扰弹策略')
     
-    # 添加图例
+    # 优化图例显示
     handles, labels = ax.get_legend_handles_labels()
-    unique_labels = []
-    unique_handles = []
-    for handle, label in zip(handles, labels):
-        if label not in unique_labels:
-            unique_labels.append(label)
-            unique_handles.append(handle)
-    ax.legend(unique_handles, unique_labels, loc='upper right')
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys(), loc='upper right', fontsize=8)
     
     # 保存图片
     plt.tight_layout()
-    plt.savefig(f'{RESULTS_DIR}/problem3_optimal_solution.png', dpi=300)
+    plt.savefig(f'{RESULTS_DIR}/problem4_optimal_solution.png', dpi=300)
     plt.close()
     
     # 绘制时间线图，显示各烟幕弹的有效遮蔽区间
     plt.figure(figsize=(12, 6))
     
-    colors = ['orange', 'purple', 'cyan']
-    labels = ['烟幕弹1', '烟幕弹2', '烟幕弹3']
+    colors = ['green', 'purple', 'orange']
+    labels = ['FY1烟幕弹', 'FY2烟幕弹', 'FY3烟幕弹']
     
     for i, intervals in enumerate(result['intervals']):
         for start, end in intervals:
@@ -860,7 +775,7 @@ def visualize_multi_smoke_effect(result):
     
     plt.yticks([0, 1, 2], labels)
     plt.xlabel('时间 (秒)')
-    plt.title('三枚烟幕干扰弹的有效遮蔽时间区间')
+    plt.title('三架无人机烟幕干扰弹的有效遮蔽时间区间')
     plt.grid(True, alpha=0.3)
     
     # 添加总有效遮蔽时长信息
@@ -868,118 +783,85 @@ def visualize_multi_smoke_effect(result):
                 ha='center', fontsize=12, bbox=dict(facecolor='white', alpha=0.8))
     
     plt.tight_layout()
-    plt.savefig(f'{RESULTS_DIR}/problem3_shielding_timeline.png', dpi=300)
+    plt.savefig(f'{RESULTS_DIR}/problem4_shielding_timeline.png', dpi=300)
     plt.close()
 
 def save_result_to_excel(result):
     """保存结果到Excel文件"""
-    direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3 = result['params']
-    
-    # 计算投放点和起爆点
-    release_pos1 = drone_trajectory(DRONE_FY1_INIT, direction, speed, t_r1)
-    detonation_time1 = t_r1 + dt_d1
-    detonation_pos1 = smoke_trajectory(release_pos1, t_r1, direction, speed, detonation_time1)
-    
-    release_pos2 = drone_trajectory(DRONE_FY1_INIT, direction, speed, t_r2)
-    detonation_time2 = t_r2 + dt_d2
-    detonation_pos2 = smoke_trajectory(release_pos2, t_r2, direction, speed, detonation_time2)
-    
-    release_pos3 = drone_trajectory(DRONE_FY1_INIT, direction, speed, t_r3)
-    detonation_time3 = t_r3 + dt_d3
-    detonation_pos3 = smoke_trajectory(release_pos3, t_r3, direction, speed, detonation_time3)
+    # 解析参数
+    dir1, spd1, t_r1, dt_d1, dir2, spd2, t_r2, dt_d2, dir3, spd3, t_r3, dt_d3 = result['params']
     
     # 创建结果DataFrame
-    result_data = {
-        '参数': [
-            '飞行方向', '飞行速度',
-            '烟幕弹1投放时间', '烟幕弹1起爆延迟',
-            '烟幕弹2投放时间', '烟幕弹2起爆延迟',
-            '烟幕弹3投放时间', '烟幕弹3起爆延迟',
-            '总有效遮蔽时长'
-        ],
-        '值': [
-            f"{direction:.2f}°",
-            f"{speed:.2f} m/s",
-            f"{t_r1:.2f} s",
-            f"{dt_d1:.2f} s",
-            f"{t_r2:.2f} s",
-            f"{dt_d2:.2f} s",
-            f"{t_r3:.2f} s",
-            f"{dt_d3:.2f} s",
-            f"{result['effective_duration']:.2f} s"
-        ]
-    }
+    drone_params = [
+        ('FY1', dir1, spd1, t_r1, dt_d1),
+        ('FY2', dir2, spd2, t_r2, dt_d2),
+        ('FY3', dir3, spd3, t_r3, dt_d3)
+    ]
     
-    df_params = pd.DataFrame(result_data)
+    result_data = []
+    for i, (drone, direction, speed, release_time, detonation_delay) in enumerate(drone_params):
+        result_data.append({
+            '无人机': drone,
+            '飞行方向 (°)': round(direction, 2),
+            '飞行速度 (m/s)': round(speed, 2),
+            '投放时间 (s)': round(release_time, 2),
+            '起爆延迟 (s)': round(detonation_delay, 2),
+            '投放点X坐标 (m)': round(result['release_positions'][i][0], 2),
+            '投放点Y坐标 (m)': round(result['release_positions'][i][1], 2),
+            '投放点Z坐标 (m)': round(result['release_positions'][i][2], 2),
+            '起爆点X坐标 (m)': round(result['detonation_positions'][i][0], 2),
+            '起爆点Y坐标 (m)': round(result['detonation_positions'][i][1], 2),
+            '起爆点Z坐标 (m)': round(result['detonation_positions'][i][2], 2)
+        })
     
-    # 创建投放点和起爆点DataFrame
-    positions_data = {
-        '点位': [
-            '烟幕弹1投放点', '烟幕弹1起爆点',
-            '烟幕弹2投放点', '烟幕弹2起爆点',
-            '烟幕弹3投放点', '烟幕弹3起爆点'
-        ],
-        'X坐标 (m)': [
-            f"{release_pos1[0]:.2f}",
-            f"{detonation_pos1[0]:.2f}",
-            f"{release_pos2[0]:.2f}",
-            f"{detonation_pos2[0]:.2f}",
-            f"{release_pos3[0]:.2f}",
-            f"{detonation_pos3[0]:.2f}"
-        ],
-        'Y坐标 (m)': [
-            f"{release_pos1[1]:.2f}",
-            f"{detonation_pos1[1]:.2f}",
-            f"{release_pos2[1]:.2f}",
-            f"{detonation_pos2[1]:.2f}",
-            f"{release_pos3[1]:.2f}",
-            f"{detonation_pos3[1]:.2f}"
-        ],
-        'Z坐标 (m)': [
-            f"{release_pos1[2]:.2f}",
-            f"{detonation_pos1[2]:.2f}",
-            f"{release_pos2[2]:.2f}",
-            f"{detonation_pos2[2]:.2f}",
-            f"{release_pos3[2]:.2f}",
-            f"{detonation_pos3[2]:.2f}"
-        ]
-    }
-    
-    df_positions = pd.DataFrame(positions_data)
+    df_results = pd.DataFrame(result_data)
     
     # 创建有效遮蔽时间区间DataFrame
     intervals_data = []
     for i, intervals in enumerate(result['intervals']):
+        drone = drone_params[i][0]
         for j, (start, end) in enumerate(intervals):
             intervals_data.append({
-                '烟幕弹': f"烟幕弹{i+1}",
+                '无人机': drone,
                 '区间序号': j+1,
-                '开始时间 (s)': f"{start:.2f}",
-                '结束时间 (s)': f"{end:.2f}",
-                '时长 (s)': f"{end - start:.2f}"
+                '开始时间 (s)': round(start, 2),
+                '结束时间 (s)': round(end, 2),
+                '时长 (s)': round(end - start, 2)
             })
     
     df_intervals = pd.DataFrame(intervals_data)
     
-    # 保存到Excel文件，不同表放在不同sheet
-    with pd.ExcelWriter(f'{RESULTS_DIR}/problem3_optimal_solution.xlsx') as writer:
-        df_params.to_excel(writer, sheet_name='最优参数', index=False)
-        df_positions.to_excel(writer, sheet_name='投放点和起爆点', index=False)
-        df_intervals.to_excel(writer, sheet_name='有效遮蔽时间区间', index=False)
+    # 创建总结信息
+    summary_data = {
+        '指标': ['总有效遮蔽时长 (s)', 'FY1有效遮蔽时长 (s)', 'FY2有效遮蔽时长 (s)', 'FY3有效遮蔽时长 (s)'],
+        '值': [
+            round(result['effective_duration'], 2),
+            round(sum(end - start for start, end in result['intervals'][0]), 2),
+            round(sum(end - start for start, end in result['intervals'][1]), 2),
+            round(sum(end - start for start, end in result['intervals'][2]), 2)
+        ]
+    }
+    df_summary = pd.DataFrame(summary_data)
     
-    print(f"已保存结果到 {RESULTS_DIR}/problem3_optimal_solution.xlsx")
+    # 保存到Excel文件
+    with pd.ExcelWriter(f'{RESULTS_DIR}/problem4_optimal_solution.xlsx') as writer:
+        df_results.to_excel(writer, sheet_name='投放参数', index=False)
+        df_intervals.to_excel(writer, sheet_name='有效遮蔽时间区间', index=False)
+        df_summary.to_excel(writer, sheet_name='总结', index=False)
+    
+    print(f"已保存结果到 {RESULTS_DIR}/problem4_optimal_solution.xlsx")
 
 def main():
     """主函数"""
     start_time = time.time()
-    print("开始优化问题3: 三枚烟幕干扰弹投放策略...")
+    print("开始优化问题4: 多无人机协同投放烟幕干扰弹策略...")
     
     # 使用混合优化策略
     result = hybrid_optimization()
     
     # 可视化结果
     print("\n开始可视化最优结果...")
-    visualize_multi_smoke_effect(result)
+    visualize_multi_drone_effect(result)
     
     # 保存结果到Excel
     save_result_to_excel(result)
@@ -988,13 +870,12 @@ def main():
     print(f"\n优化完成，总耗时: {end_time - start_time:.2f}秒")
     print(f"最终有效遮蔽时长: {result['effective_duration']:.4f}秒")
     
-    direction, speed, t_r1, dt_d1, t_r2, dt_d2, t_r3, dt_d3 = result['params']
+    # 输出最优参数
+    dir1, spd1, t_r1, dt_d1, dir2, spd2, t_r2, dt_d2, dir3, spd3, t_r3, dt_d3 = result['params']
     print("\n最优烟幕干扰弹投放策略:")
-    print(f"飞行方向: {direction:.2f}°")
-    print(f"飞行速度: {speed:.2f} m/s")
-    print(f"烟幕弹1: 投放时间={t_r1:.2f}s, 起爆延迟={dt_d1:.2f}s")
-    print(f"烟幕弹2: 投放时间={t_r2:.2f}s, 起爆延迟={dt_d2:.2f}s")
-    print(f"烟幕弹3: 投放时间={t_r3:.2f}s, 起爆延迟={dt_d3:.2f}s")
+    print(f"FY1: 方向={dir1:.2f}°, 速度={spd1:.2f}m/s, 投放时间={t_r1:.2f}s, 起爆延迟={dt_d1:.2f}s")
+    print(f"FY2: 方向={dir2:.2f}°, 速度={spd2:.2f}m/s, 投放时间={t_r2:.2f}s, 起爆延迟={dt_d2:.2f}s")
+    print(f"FY3: 方向={dir3:.2f}°, 速度={spd3:.2f}m/s, 投放时间={t_r3:.2f}s, 起爆延迟={dt_d3:.2f}s")
     
     return result
 
