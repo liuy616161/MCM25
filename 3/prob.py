@@ -532,150 +532,6 @@ def genetic_algorithm(population_size=80, generations=40, elite_size=8, mutation
     
     return best_result
 
-def particle_swarm_optimization(n_particles=50, iterations=30):
-    """粒子群优化算法"""
-    # 从问题2的结果初始化方向和速度范围
-    direction_range = (1, 10)
-    speed_range = (90, 140)
-    
-    # 参数范围定义
-    param_ranges = [
-        direction_range,           # 方向
-        speed_range,               # 速度
-        (0.0, 2.0),                # t_r1
-        (0.0, 2.0),                # dt_d1
-        (0.0, 5.0),                # t_r2
-        (0.0, 2.0),                # dt_d2
-        (0.0, 8.0),                # t_r3
-        (0.0, 2.0)                 # dt_d3
-    ]
-    
-    # 初始化粒子
-    particles = []
-    velocities = []
-    for _ in range(n_particles):
-        # 随机初始化粒子位置
-        particle = []
-        for i, (min_val, max_val) in enumerate(param_ranges):
-            particle.append(random.uniform(min_val, max_val))
-        
-        # 确保参数合法
-        particle = constrain_params(particle)
-        particles.append(particle)
-        
-        # 初始化粒子速度
-        velocity = []
-        for i, (min_val, max_val) in enumerate(param_ranges):
-            range_size = max_val - min_val
-            velocity.append(random.uniform(-range_size * 0.1, range_size * 0.1))
-        velocities.append(velocity)
-    
-    # 初始化粒子历史最佳位置和适应度
-    best_positions = particles.copy()
-    best_fitnesses = [0] * n_particles
-    
-    # 全局最佳位置和适应度
-    global_best_position = None
-    global_best_fitness = 0
-
-    # 创建列表存储每次迭代的最佳个体
-    iteration_best_records = []
-    
-    # 迭代优化
-    for iteration in range(iterations):
-        print(f"\n开始第 {iteration+1}/{iterations} 次迭代")
-        
-        # 当前迭代的最佳适应度
-        iteration_best_fitness = 0
-        iteration_best_particle = None
-        
-        # 评估每个粒子的适应度
-        for i, particle in enumerate(particles):
-            # 确保参数合法
-            if not validate_params(particle):
-                continue
-            
-            result = calculate_multi_smoke_effect(particle)
-            fitness = result['effective_duration']
-            
-            # 更新当前迭代的最佳
-            if fitness > iteration_best_fitness:
-                iteration_best_fitness = fitness
-                iteration_best_particle = particle.copy()
-
-
-            # 更新个体历史最佳
-            if fitness > best_fitnesses[i]:
-                best_fitnesses[i] = fitness
-                best_positions[i] = particle.copy()
-                
-                # 更新全局最佳
-                if fitness > global_best_fitness:
-                    global_best_fitness = fitness
-                    global_best_position = particle.copy()
-                    print(f"第 {iteration+1} 次迭代: 找到更好的解，有效时长: {global_best_fitness:.4f}")
-                    print(f"参数: {global_best_position}")
-        
-
-        # 记录本次迭代的最佳个体
-        if iteration_best_particle:
-            record = {
-                'iteration': iteration + 1,
-                'fitness': round(iteration_best_fitness, 4),
-                'direction': round(iteration_best_particle[0], 4),
-                'speed': round(iteration_best_particle[1], 4),
-                't_r1': round(iteration_best_particle[2], 4),
-                'dt_d1': round(iteration_best_particle[3], 4),
-                't_r2': round(iteration_best_particle[4], 4),
-                'dt_d2': round(iteration_best_particle[5], 4),
-                't_r3': round(iteration_best_particle[6], 4),
-                'dt_d3': round(iteration_best_particle[7], 4)
-            }
-            iteration_best_records.append(record)
-
-        # 更新粒子速度和位置
-        w = 0.7  # 惯性权重
-        c1 = 1.5  # 个体学习因子
-        c2 = 1.5  # 社会学习因子
-        
-        for i in range(n_particles):
-            for j in range(len(particles[i])):
-                # 更新速度
-                velocities[i][j] = (w * velocities[i][j] + 
-                                  c1 * random.random() * (best_positions[i][j] - particles[i][j]) +
-                                  c2 * random.random() * (global_best_position[j] - particles[i][j]))
-                
-                # 限制速度
-                max_velocity = (param_ranges[j][1] - param_ranges[j][0]) * 0.1
-                velocities[i][j] = max(-max_velocity, min(max_velocity, velocities[i][j]))
-                
-                # 更新位置
-                particles[i][j] += velocities[i][j]
-            # 保存最后一代粒子群记录到Excel
-            if i == n_particles - 1 and iteration == iterations - 1:
-                df_particles = pd.DataFrame(particles)
-                df_particles.columns = ['direction', 'speed', 't_r1', 'dt_d1', 't_r2', 'dt_d2', 't_r3', 'dt_d3']
-                df_particles['fitness'] = best_fitnesses
-                df_particles.to_excel(f'{RESULTS_DIR}/pso_final_particles.xlsx', index=False)
-                print(f"已保存粒子群优化最后一代粒子到 {RESULTS_DIR}/pso_final_particles.xlsx")
-            
-            # 约束参数
-            particles[i] = constrain_params(particles[i])
-        
-        # 显示当前迭代最佳
-        print(f"第 {iteration+1} 次迭代全局最佳适应度: {global_best_fitness:.4f}")
-    
-    # 保存每次迭代的最佳个体记录到Excel
-    df_records = pd.DataFrame(iteration_best_records)
-    df_records.to_excel(f'{RESULTS_DIR}/pso_iteration_best_records.xlsx', index=False)
-    print(f"已保存粒子群优化每次迭代最佳个体记录到 {RESULTS_DIR}/pso_iteration_best_records.xlsx")
-    
-
-    # 对最佳粒子进行局部搜索微调
-    print("\n对全局最佳解进行局部搜索微调...")
-    best_result = adaptive_local_search(global_best_position, iterations=20)
-    
-    return best_result
 
 def hybrid_optimization():
     """混合优化策略：结合多种算法"""
@@ -685,14 +541,10 @@ def hybrid_optimization():
     print("\n===== 执行遗传算法 =====")
     ga_result = genetic_algorithm()
     
-    # 3. 粒子群算法
-    print("\n===== 执行粒子群优化 =====")
-    pso_result = particle_swarm_optimization()
     
     # 比较三种算法的结果
     results = [
-        ("遗传算法", ga_result),
-        ("粒子群优化", pso_result)
+        ("遗传算法", ga_result)
     ]
     
     best_method = max(results, key=lambda x: x[1]['effective_duration'])
