@@ -1,0 +1,31 @@
+参数最佳组合:
+
+direction_speed:
+  direction: 8
+  speed: 130
+  effective_duration: 3.1399999999999997
+
+direction_release_time:
+  direction: 3
+  release_time: 0.29155
+  effective_duration: 3.4225
+
+direction_detonation_delay:
+  direction: 178
+  detonation_delay: 2.674
+  effective_duration: 3.5496666666666665
+
+speed_release_time:
+  speed: 90
+  release_time: 1.0665
+  effective_duration: 2.4522033898305087
+
+speed_detonation_delay:
+  speed: 130
+  detonation_delay: 3.6094999999999997
+  effective_duration: 2.5758823529411763
+
+release_time_detonation_delay:
+  release_time: 1.0665
+  detonation_delay: 0.33165
+  effective_duration: 2.8717363344051448

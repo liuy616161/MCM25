@@ -267,9 +267,9 @@ def optimize_problem2():
     # 搜索空间
     for direction in directions: 
         start_direction_time = time.time()
-        for speed in range(70, 141, 20):  # 70到140 m/s，每2.5 m/s搜索一次
-            for release_time in np.linspace(0.1, 6, 30):  # 0.5到15秒，30个点
-                for detonation_delay in np.linspace(0.1, 6, 30):  # 1到6秒，11个点
+        for speed in np.linspace(70, 140, 21):  # 70到140 m/s，每2.5 m/s搜索一次
+            for release_time in np.linspace(0, 1.5, 11):  
+                for detonation_delay in np.linspace(0, 1, 11):  
                     if release_time + detonation_delay > 7:
                         continue
                     result = calculate_effective_shielding_time(
@@ -342,8 +342,8 @@ def optimize_problem2():
         # 在最优参数附近进行精细化搜索
         fine_tuning_solutions = []
         
-        for d in range(direction - 0.5, direction + 0.5, 10):
-            for s in range(max(70, speed - 1.5), min(140, speed + 1.5), 20):
+        for d in np.linspace(direction - 0.5, direction + 0.5, 10):
+            for s in np.linspace(max(70, speed - 1.5), min(140, speed + 1.5), 20):
                 for rt in np.linspace(max(0.1, release_time - 0.25), release_time + 0.25, 10):
                     for dd in np.linspace(max(0.5, detonation_delay - 0.25), detonation_delay + 0.25, 10):
                         
