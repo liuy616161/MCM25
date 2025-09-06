@@ -144,6 +144,11 @@ def is_target_in_shadow_cone(missile_pos, cloud_pos, target_pos, target_radius, 
             
         # 计算该向量与导弹到云团方向的夹角余弦值
         cos_angle = np.dot(missile_to_point, unit_direction) / distance
+        
+        if cos_angle > 0:
+            # 如果夹角大于90度，说明点在导弹的背后，不在阴影锥体内
+            return False
+        
         # 取绝对值
         cos_angle = abs(cos_angle)
         cos_theta = abs(cos_theta)

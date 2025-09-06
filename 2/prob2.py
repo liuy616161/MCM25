@@ -230,6 +230,58 @@ def calculate_effective_shielding_time(drone_direction, drone_speed, release_tim
         'detonation_pos': detonation_pos,
         'detonation_time': detonation_time
     }
+
+
+def calculate_effective_shielding_time_2(drone_direction, drone_speed, release_time, detonation_delay):
+    """计算指定参数下的有效遮蔽时长"""
+    detonation_time = release_time + detonation_delay
+    
+    # 计算投放点
+    release_pos = drone_trajectory(DRONE_FY1_INIT, drone_direction, drone_speed, release_time)
+    
+    # 计算起爆点
+    detonation_pos = smoke_trajectory(release_pos, release_time, drone_direction, drone_speed, detonation_time)
+    
+    limit_time = detonation_time + SMOKE_EFFECTIVE_TIME
+    
+    # 模拟导弹和烟幕的轨迹
+    effective_duration = 0
+    in_cloud = False
+    start_time = None
+    
+    # 时间步长
+    time_step = 0.001
+    
+    # 遍历导弹飞行的整个过程
+    for t in np.arange(0, limit_time, time_step):
+        missile_pos = missile_trajectory(MISSILE_M1_INIT, FAKE_TARGET, MISSILE_SPEED, t)
+        
+        if t >= detonation_time and t - detonation_time <= SMOKE_EFFECTIVE_TIME:
+            cloud_pos = smoke_cloud_trajectory(detonation_pos, detonation_time, t)
+            
+            if cloud_pos is not None:
+                is_effective = calculate_shielding_effectiveness(
+                    missile_pos, cloud_pos, detonation_time, t
+                )
+                
+                if is_effective and not in_cloud:
+                    in_cloud = True
+                    start_time = t
+                elif not is_effective and in_cloud:
+                    in_cloud = False
+                    effective_duration += (t - start_time)
+    
+    # 检查如果结束时仍在云团中
+    if in_cloud:
+        end_time = min(missile_total_time, detonation_time + SMOKE_EFFECTIVE_TIME)
+        effective_duration += (end_time - start_time)
+    
+    return {
+        'effective_duration': effective_duration,
+        'release_pos': release_pos,
+        'detonation_pos': detonation_pos,
+        'detonation_time': detonation_time
+    }
 def optimize_problem2():
     """优化问题2: 寻找最佳烟幕干扰弹投放策略，并保存所有解决方案"""
     print("正在优化问题2...")
@@ -247,22 +299,22 @@ def optimize_problem2():
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     
-    directions = np.linspace(0, 10, 41)
+    directions = np.linspace(3, 9, 41) #41
 
     # 搜索空间
     for direction in directions: 
         start_direction_time = time.time()
-        for speed in np.linspace(90, 140, 26):  # 70到140 m/s，每2.5 m/s搜索一次
-            for release_time in np.linspace(0, 1.5, 11):  
-                for detonation_delay in np.linspace(0, 1, 11):  
+        for speed in np.linspace(90, 140, 26):  #26# 70到140 m/s，每2.5 m/s搜索一次
+            for release_time in np.linspace(0, 1.5, 11):  #11 
+                for detonation_delay in np.linspace(0, 1, 11): #11  
                     if release_time + detonation_delay > 7:
                         continue
                     result = calculate_effective_shielding_time(
                         direction, speed, release_time, detonation_delay
                     )
                     
-                    # 将当前解决方案添加到列表中(只保存有效时长大于0的方案)
-                    if result['effective_duration'] > 0:
+                    # 将当前解决方案添加到列表中(只保存有效时长大于4的方案)
+                    if result['effective_duration'] > 4:
                         solution = {
                             'direction': direction,
                             'speed': speed,
@@ -316,7 +368,67 @@ def optimize_problem2():
         df_best = df_all.sort_values(by='effective_duration', ascending=False).head(10)
         df_best.to_excel(f"{results_dir}/top10_solutions.xlsx", index=False)
         print(f"已保存前10个最佳解决方案到 {results_dir}/top10_solutions.xlsx")
-      
+
+        # 对每个解决方案进行精细化搜索
+        all_fine_tuned_solutions = []
+        best_solutions = []
+        
+        for i, row in df_best.iterrows():
+            solution_id = i + 1
+            base_solution = row.to_dict()
+            
+            # 进行精细化搜索
+            best_params, fine_tuned_solutions = fine_tune_solution(base_solution, solution_id, results_dir)
+            
+            # 添加到所有解决方案列表
+            all_fine_tuned_solutions.extend(fine_tuned_solutions)
+            best_solutions.append(best_params)
+        
+        # 保存所有精细化搜索的解决方案
+        if all_fine_tuned_solutions:
+            df_all = pd.DataFrame(all_fine_tuned_solutions)
+            df_all.to_excel(f"{results_dir}/all_fine_tuned_solutions.xlsx", index=False)
+            print(f"已保存所有精细化搜索的解决方案，共 {len(all_fine_tuned_solutions)} 个方案")
+        
+        # 比较各个起点的最佳解决方案
+        if best_solutions:
+            df_best = pd.DataFrame([
+                {
+                    'solution_id': params['solution_id'],
+                    'direction': params['direction'],
+                    'speed': params['speed'],
+                    'release_time': params['release_time'],
+                    'detonation_delay': params['detonation_delay'],
+                    'effective_duration': params['effective_duration']
+                }
+                for params in best_solutions
+            ])
+            
+            # 按有效时长排序
+            df_best = df_best.sort_values(by='effective_duration', ascending=False)
+            df_best.to_excel(f"{results_dir}/best_solutions_comparison.xlsx", index=False)
+            print("\n各起点精细化搜索的最佳解决方案比较:")
+            print(df_best[['solution_id', 'direction', 'speed', 'release_time', 'detonation_delay', 'effective_duration']])
+            
+            # 找出全局最优解
+            global_best = df_best.iloc[0]
+            print("\n全局最优解决方案:")
+            print(f"来自解决方案 #{global_best['solution_id']}")
+            print(f"方向: {global_best['direction']:.2f}°")
+            print(f"速度: {global_best['speed']:.2f} m/s")
+            print(f"投放时间: {global_best['release_time']:.2f} s")
+            print(f"起爆延迟: {global_best['detonation_delay']:.2f} s")
+            print(f"有效遮蔽时长: {global_best['effective_duration']:.2f} s")
+            
+            
+            # 将最优解单独保存
+            best_solution_id = global_best['solution_id']
+            best_solution_data = df_all[df_all['base_solution_id'] == best_solution_id]
+            best_solution_data = best_solution_data.sort_values(by='effective_duration', ascending=False)
+            best_solution_data.head(10).to_excel(f"{results_dir}/global_best_solution_details.xlsx", index=False)
+            print(f"已保存全局最优解决方案详情到 {results_dir}/global_best_solution_details.xlsx")
+
+
     end_time = time.time()
     print(f"优化完成，总耗时: {end_time - start_time:.2f}秒")
     
@@ -353,6 +465,112 @@ def optimize_problem2():
         # 可视化最优结果
         visualize_solution(best_params)
     return best_params, all_solutions
+
+
+
+def fine_tune_solution(base_solution, solution_id, results_dir):
+    """对一个基础解决方案进行精细化搜索"""
+    print(f"\n开始对解决方案 #{solution_id} 进行精细化搜索:")
+    print(f"基础参数: 方向={base_solution['direction']}°, 速度={base_solution['speed']}m/s, "
+          f"投放时间={base_solution['release_time']:.2f}s, 起爆延迟={base_solution['detonation_delay']:.2f}s, "
+          f"有效时长={base_solution['effective_duration']:.2f}s")
+    
+    start_time = time.time()
+    
+    # 提取基础参数
+    direction = base_solution['direction']
+    speed = base_solution['speed']
+    release_time = base_solution['release_time']
+    detonation_delay = base_solution['detonation_delay']
+    best_duration = base_solution['effective_duration']
+    
+    # 创建精细化搜索结果列表
+    fine_tuning_solutions = []
+    best_params = {
+        'direction': direction,
+        'speed': speed,
+        'release_time': release_time,
+        'detonation_delay': detonation_delay,
+        'effective_duration': best_duration,
+        'solution_id': solution_id
+    }
+    
+    # 定义搜索范围
+    direction_range = np.linspace(direction - 0.075, direction + 0.075, 5)
+    speed_range = np.linspace(max(70, speed - 0.5), min(140, speed + 0.5), 5)
+    release_time_range = np.linspace(max(0.1, release_time - 0.25), release_time + 0.25, 5)
+    detonation_delay_range = np.linspace(max(0.1, detonation_delay - 0.25), detonation_delay + 0.25, 5)
+    
+    total_combinations = len(direction_range) * len(speed_range) * len(release_time_range) * len(detonation_delay_range)
+    print(f"搜索范围: 方向={direction-0.5}°到{direction+0.5}°, 速度={max(70, speed-1.5)}m/s到{min(140, speed+1.5)}m/s")
+    print(f"         投放时间={max(0.1, release_time-0.25)}s到{release_time+0.25}s, 起爆延迟={max(0.1, detonation_delay-0.25)}s到{detonation_delay+0.25}s")
+    print(f"总搜索组合数: {total_combinations}")
+    
+    # 进行精细化搜索
+    completed = 0
+    for d in direction_range:
+        for s in speed_range:
+            for rt in release_time_range:
+                for dd in detonation_delay_range:
+                    # 计算有效遮蔽时长
+                    result = calculate_effective_shielding_time_2(d, s, rt, dd)
+                    
+                    # 只保存有效的解决方案
+                    if result['effective_duration'] > 0:
+                        solution = {
+                            'direction': d,
+                            'speed': s,
+                            'release_time': rt,
+                            'detonation_delay': dd,
+                            'release_pos_x': result['release_pos'][0],
+                            'release_pos_y': result['release_pos'][1],
+                            'release_pos_z': result['release_pos'][2],
+                            'detonation_pos_x': result['detonation_pos'][0],
+                            'detonation_pos_y': result['detonation_pos'][1],
+                            'detonation_pos_z': result['detonation_pos'][2],
+                            'effective_duration': result['effective_duration'],
+                            'base_solution_id': solution_id
+                        }
+                        fine_tuning_solutions.append(solution)
+                    
+                    # 更新最佳解决方案
+                    if result['effective_duration'] > best_params['effective_duration']:
+                        best_params = {
+                            'direction': d,
+                            'speed': s,
+                            'release_time': rt,
+                            'detonation_delay': dd,
+                            'release_pos': result['release_pos'],
+                            'detonation_pos': result['detonation_pos'],
+                            'detonation_time': result['detonation_time'],
+                            'effective_duration': result['effective_duration'],
+                            'solution_id': solution_id
+                        }
+                        
+                        print(f"发现更优解: 方向={d:.2f}°, 速度={s:.2f}m/s, "
+                              f"投放时间={rt:.2f}s, 起爆延迟={dd:.2f}s, "
+                              f"有效时长={result['effective_duration']:.4f}s")
+                    
+                    # 更新进度
+                    completed += 1
+                    if completed % 500 == 0:
+                        progress = (completed / total_combinations) * 100
+                        print(f"完成: {completed}/{total_combinations} ({progress:.1f}%)")
+    
+    # 保存精细化搜索结果
+    if fine_tuning_solutions:
+        df_fine = pd.DataFrame(fine_tuning_solutions)
+        file_path = f"{results_dir}/fine_tuning_solution_{solution_id}.xlsx"
+        df_fine.to_excel(file_path, index=False)
+        print(f"已保存精细化搜索结果到 {file_path}，共 {len(fine_tuning_solutions)} 个方案")
+    
+    # 输出统计信息
+    end_time = time.time()
+    print(f"精细化搜索耗时: {end_time - start_time:.2f}秒")
+    print(f"改进幅度: {(best_params['effective_duration'] - best_duration) / best_duration * 100:.2f}%")
+    
+    return best_params, fine_tuning_solutions
+
 
 def visualize_solution(params):
     """可视化最优解决方案"""
