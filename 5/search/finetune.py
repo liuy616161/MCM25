@@ -318,14 +318,14 @@ def fine_tune_search(drone_idx, missile_idx, num_top_solutions=5):
         
         # 定义精细搜索范围（较小的步长）
         # 方向: ±2度，步长0.5度
-        directions = np.linspace(max(0, orig_direction-8), min(360, orig_direction+8), 11)
+        directions = np.linspace(max(0, orig_direction-4), min(360, orig_direction+4), 11)
         # 速度: ±2.5 m/s，步长0.5 m/s
-        speeds = np.linspace(max(70, orig_speed-5), min(140, orig_speed+5), 11)
+        speeds = np.linspace(max(70, orig_speed-1), min(140, orig_speed+1), 11)
         # 投放时间: ±1秒，步长0.2秒
-        release_times = np.linspace(max(0, orig_release_time-3), orig_release_time+3, 11)
+        release_times = np.linspace(max(0, orig_release_time-1), orig_release_time+1, 11)
         # 起爆延迟: ±1秒，步长0.2秒
-        detonation_delays = np.linspace(max(0, orig_detonation_delay-3), 
-                                        min(10, orig_detonation_delay+2), 11)
+        detonation_delays = np.linspace(max(0, orig_detonation_delay-1), 
+                                        min(10, orig_detonation_delay+1), 11)
         
         # 记录当前解决方案的最佳精细化结果
         best_fine_tuned = None

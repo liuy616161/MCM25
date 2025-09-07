@@ -265,14 +265,19 @@ def optimize_problem(drone_idx,missile_idx):
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     
-    directions = np.linspace(0, 360, 41) #41
+    if DRONE_POSITIONS[drone_idx][1] - MISSILE_POSITIONS[missile_idx][1] < 0:
+        directions = np.linspace(0, 180, 41)
+    else:
+        directions = np.linspace(180, 360, 41)
+
+
 
     # 搜索空间
     for direction in directions: 
         start_direction_time = time.time()
-        for speed in np.linspace(70, 140, 26):  #26# 70到140 m/s，每2.5 m/s搜索一次
+        for speed in np.linspace(100, 140, 21):  #26# 70到140 m/s，每2.5 m/s搜索一次
             for release_time in np.linspace(0, 40, 11):  #11 
-                for detonation_delay in np.linspace(0, 10, 11): #11  
+                for detonation_delay in np.linspace(0, 20, 21): #11  
                 
                     result = calculate_effective_shielding_time(
                         drone_idx,missile_idx,direction, speed, release_time, detonation_delay
@@ -375,5 +380,7 @@ def optimize_problem(drone_idx,missile_idx):
 if __name__ == "__main__":
     for i in range(5):
         for j in range(3):
+            if i==0 :
+                continue
             best_params, all_solutions = optimize_problem(i,j)
     
