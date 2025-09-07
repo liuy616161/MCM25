@@ -407,8 +407,8 @@ def visualize_problem1():
     
     # 设置坐标轴范围和标签
     ax.set_xlim([16000, 20000])
-    ax.set_ylim([-1000, 1000])
-    ax.set_zlim([1000, 3000])
+    ax.set_ylim([-200, 200])
+    ax.set_zlim([1500, 2000])
     ax.set_xlabel('X轴 (m)')
     ax.set_ylabel('Y轴 (m)')
     ax.set_zlabel('Z轴 (m)')

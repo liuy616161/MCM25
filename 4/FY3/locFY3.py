@@ -249,7 +249,7 @@ def optimize_problem2():
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     
-    directions = np.linspace(70, 100, 21) #41
+    directions = np.linspace(0, 180, 41) #41   #0 180
 
     # 搜索空间
     for direction in directions: 
