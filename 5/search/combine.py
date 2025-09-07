@@ -554,7 +554,12 @@ def optimize_defense_strategy(num_combinations_per_drone=2):
     print(f"已保存前100个最佳防御策略到 {results_dir}/top100_defense_strategies.xlsx")
     
     # 输出最佳策略
+    # 如果其中一个遮蔽时长为0则跳过，选择下一个
+
     best_result = sorted_results[0]
+    for best_result in sorted_results:
+        if all(t > 0 for t in best_result['times_by_missile']):
+            break
     print("\n最佳防御策略:")
     print(f"总有效遮蔽时长: {best_result['total_time']:.2f}秒")
     print(f"导弹M1有效遮蔽时长: {best_result['times_by_missile'][0]:.2f}秒")
