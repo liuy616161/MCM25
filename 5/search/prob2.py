@@ -373,5 +373,7 @@ def optimize_problem(drone_idx,missile_idx):
 
 
 if __name__ == "__main__":
-    best_params, all_solutions = optimize_problem(2,2)
+    for i in range(5):
+        for j in range(3):
+            best_params, all_solutions = optimize_problem(i,j)
     
